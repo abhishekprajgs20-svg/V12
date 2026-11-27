@@ -1,0 +1,7 @@
+.buildozer/
+.ffmpeg-build/
+.bin/
+bin/
+__pycache__/
+*.pyc
+*.log
