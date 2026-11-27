@@ -2,12 +2,12 @@
 
 This project adapts the supplied V12 renderer to a touch-first Android app. It is configured to build for **ARM64 (`arm64-v8a`) and legacy 32-bit ARM (`armeabi-v7a`)** Android phones, with Android 7.0 / API 24 as the minimum target. This covers the CPU architectures used by the vast majority of Android phones; it does not include x86/x86_64 emulator builds.
 
-## Status (v12.0.1)
+## Status (v12.0.2)
 
 Source project, built in the cloud by GitHub Actions (no Android SDK needed on your PC).
 Fixed in this version: English fonts bundled (Open Sans), FFmpeg shipped as `libs/<abi>/libffmpegbin.so`
 and run from the native-library folder (works on Android 10+), local `uharfbuzz` recipe for Hindi shaping,
-pinned toolchain (buildozer 1.5.0, p4a v2024.01.21, NDK r25b, API 33), proper Android file picker,
+pinned toolchain (buildozer 1.5.0, p4a v2024.01.21, NDK r25b, API 33), Android SAF file reading through ContentResolver (avoids treating content:// URIs as filesystem paths),
 automatic copy of finished videos to Movies, screen kept awake while rendering.
 Tested on desktop Linux: parsing, Hindi + English rendering, full UI-to-video flow. NOT yet tested on a real phone.
 If the Actions build fails, download the `build-log` artifact and send the first error.
@@ -32,7 +32,7 @@ If the Actions build fails, download the `build-log` artifact and send the first
 
 The retained renderer includes the V12 themes, transitions, text/quiz parsing, animated overlays, intro/outro, explanation, watermark, music mixing, video backgrounds, chunked generation, and output-format definitions. The mobile UI replaces the original Windows Tkinter interface and Windows SAPI5 speech layer; Android voice generation uses Edge Neural TTS over the internet. Neural voice generation therefore needs a working internet connection.
 
-The app has a Movies/Gallery export action using `androidstorage4kivy`. Android file-picker `content://` URI handling and storage behavior vary by Android version and provider; these paths still need end-to-end validation on real devices. A successful build alone is not proof of universal compatibility.
+The app has a Movies/Gallery export action using `androidstorage4kivy`. The picker copies selected SAF `content://` documents into app-private storage through Android ContentResolver on a background thread. This avoids the prior `Permission denied` failure caused by trying to use provider URIs or shared-storage copies as ordinary filesystem paths. The change still needs end-to-end validation on the target physical phone. A successful build alone is not proof of universal compatibility.
 
 ## Syntax check
 

@@ -5,7 +5,7 @@ package.domain = com.quizinox
 source.dir = .
 source.include_exts = py,kv,ttf,txt,png,jpg
 source.exclude_dirs = .buildozer,.ffmpeg-build,.github,scripts,bin,libs,p4a-recipes,__pycache__
-version = 12.0.1
+version = 12.0.2
 orientation = portrait
 fullscreen = 0
 

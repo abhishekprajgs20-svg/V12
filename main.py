@@ -490,23 +490,91 @@ class RootUI(BoxLayout):
         pop = Popup(title=title, content=box, size_hint=(.88,.42))
         btn.bind(on_release=pop.dismiss); pop.open()
 
+    def _copy_android_content_uri(self, uri_value, index=0):
+        """Copy a SAF content:// URI into private app storage via ContentResolver.
+
+        Do not turn content URIs into filesystem paths: Android document providers are
+        virtual and direct path access commonly fails with EACCES on Android 10+.
+        """
+        from jnius import autoclass, jarray
+        from urllib.parse import urlparse
+        uri_text = str(uri_value)
+        Uri = autoclass('android.net.Uri')
+        OpenableColumns = autoclass('android.provider.OpenableColumns')
+        activity = autoclass('org.kivy.android.PythonActivity').mActivity
+        resolver = activity.getContentResolver()
+        uri = Uri.parse(uri_text)
+
+        display_name = None
+        cursor = None
+        try:
+            cursor = resolver.query(uri, None, None, None, None)
+            if cursor is not None and cursor.moveToFirst():
+                col = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if col >= 0:
+                    display_name = str(cursor.getString(col))
+        except Exception as exc:
+            self._log('[PICKER] display-name lookup: ' + repr(exc))
+        finally:
+            if cursor is not None:
+                try: cursor.close()
+                except Exception: pass
+
+        if not display_name:
+            display_name = os.path.basename(urlparse(uri_text).path) or ('selected_' + str(index))
+        safe_name = os.path.basename(display_name).replace('\\', '_').replace('/', '_')
+        suffix = Path(safe_name).suffix
+        stem = Path(safe_name).stem or ('selected_' + str(index))
+        dest_dir = App.get_running_app().user_data_dir
+        os.makedirs(dest_dir, exist_ok=True)
+        dest = os.path.join(dest_dir, f'{stem}_{index}{suffix}')
+
+        stream = resolver.openInputStream(uri)
+        if stream is None:
+            raise RuntimeError('Android could not open the selected file. Please select it again.')
+        try:
+            buf = jarray('b')(65536)
+            with open(dest, 'wb') as out:
+                while True:
+                    count = stream.read(buf)
+                    if count == -1:
+                        break
+                    if count > 0:
+                        out.write(bytes((int(buf[i]) & 255) for i in range(count)))
+            if not os.path.isfile(dest) or os.path.getsize(dest) == 0:
+                raise RuntimeError('The selected file is empty or could not be copied.')
+        except Exception:
+            try: os.remove(dest)
+            except Exception: pass
+            raise
+        finally:
+            try: stream.close()
+            except Exception: pass
+        return dest
+
     def _pick(self, callback, filters, mime='*/*', multiple=False):
         if IS_ANDROID:
             try:
                 from androidstorage4kivy import Chooser
                 def cb(uris):
-                    def work(dt):
-                        paths = []
-                        try:
-                            from androidstorage4kivy import SharedStorage
-                            ss = SharedStorage()
-                            for u in uris or []:
-                                pth = ss.copy_from_shared(u)
-                                if pth: paths.append(pth)
-                        except Exception as exc:
-                            self._log('[PICKER] ' + repr(exc))
-                        callback(paths)
-                    Clock.schedule_once(work, 0)
+                    # File I/O is deliberately off the UI thread. The URI permission
+                    # granted by ACTION_OPEN_DOCUMENT is consumed immediately here.
+                    selected = list(uris or [])
+                    def copy_files():
+                        paths, errors = [], []
+                        for i, uri in enumerate(selected):
+                            try:
+                                paths.append(self._copy_android_content_uri(uri, i))
+                            except Exception as exc:
+                                errors.append(str(exc))
+                                self._log('[PICKER] URI copy failed: ' + repr(exc))
+                        def finish(_dt):
+                            if paths:
+                                callback(paths)
+                            elif selected:
+                                self._popup('File access error', 'Android selected the file but the app could not read it.\n\n' + '\n'.join(errors[:3]))
+                        Clock.schedule_once(finish, 0)
+                    threading.Thread(target=copy_files, daemon=True).start()
                 self._chooser = Chooser(cb)
                 self._chooser.choose_content(mime, multiple=multiple)
                 return
@@ -538,7 +606,9 @@ class RootUI(BoxLayout):
     def _copy_if_needed(self, path, name):
         path = str(path)
         if path.startswith('content://'):
-            raise RuntimeError('Picker returned a content URI that could not be copied. Try another file manager.')
+            if IS_ANDROID:
+                return self._copy_android_content_uri(path, 0)
+            raise RuntimeError('Cannot read Android content URI on this device.')
         if os.path.exists(path):
             dest = os.path.join(App.get_running_app().user_data_dir, name)
             if os.path.abspath(path) != os.path.abspath(dest): shutil.copy2(path, dest)
